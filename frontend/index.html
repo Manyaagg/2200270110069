@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>URL Shortener</title>
+  <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mui/material@5.14.18/umd/material-ui.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.23.4/babel.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+    const {
+      Container, TextField, Button, Typography, Box, Paper, Alert, CircularProgress,
+      Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Tabs, Tab,
+      List, ListItem, ListItemText
+    } = window['@mui/material'];
+
+    // Custom Logging Utility
+    const Logger = {
+      log: (level, message, metadata = {}) => {
+        const logEntry = {
+          timestamp: new Date().toISOString(),
+          level,
+          message,
+          metadata,
+        };
+        // Simulate middleware integration
+        localStorage.setItem(
+          `log_${Date.now()}`,
+          JSON.stringify(logEntry)
+        );
+        console.log(`[${level}] ${message}`, metadata); // For debugging
+      },
+      info: (message, metadata) => Logger.log('INFO', message, metadata),
+      error: (message, metadata) => Logger.log('ERROR', message, metadata),
+      warn: (message, metadata) => Logger.log('WARN', message, metadata),
+    };
+
+    // Utility to generate unique shortcode
+    const generateShortcode = () => {
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+      let code = '';
+      for (let i = 0; i < 6; i++) {
+        code += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      return code;
+    };
+
+    // Validate URL format
+    const isValidUrl = (url) => {
+      try {
+        new URL(url);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    // Validate shortcode
+    const isValidShortcode = (code) => /^[a-zA-Z0-9]{3,10}$/.test(code);
+
+    // Main App Component
+    function App() {
+      const [urls, setUrls] = useState([]);
+      const [formData, setFormData] = useState([
+        { longUrl: '', validity: '', shortcode: '' },
+        { longUrl: '', validity: '', shortcode: '' },
+        { longUrl: '', validity: '', shortcode: '' },
+        { longUrl: '', validity: '', shortcode: '' },
+        { longUrl: '', validity: '', shortcode: '' },
+      ]);
+      const [errors, setErrors] = useState([]);
+      const [tabValue, setTabValue] = useState(0);
+      const [loading, setLoading] = useState(false);
+      const [analytics, setAnalytics] = useState({});
+
+      // Load URLs from localStorage
+      useEffect(() => {
+        const storedUrls = JSON.parse(localStorage.getItem('shortenedUrls') || '[]');
+        setUrls(storedUrls);
+        const storedAnalytics = JSON.parse(localStorage.getItem('analytics') || '{}');
+        setAnalytics(storedAnalytics);
+        Logger.info('Application initialized', { storedUrlsCount: storedUrls.length });
+      }, []);
+
+      // Save URLs to localStorage
+      const saveUrls = (newUrls) => {
+        localStorage.setItem('shortenedUrls', JSON.stringify(newUrls));
+        setUrls(newUrls);
+      };
+
+      // Save analytics to localStorage
+      const saveAnalytics = (newAnalytics) => {
+        localStorage.setItem('analytics', JSON.stringify(newAnalytics));
+        setAnalytics(newAnalytics);
+      };
+
+      // Handle form input changes
+      const handleInputChange = (index, field, value) => {
+        const newFormData = [...formData];
+        newFormData[index][field] = value;
+        setFormData(newFormData);
+      };
+
+      // Handle form submission
+      const handleSubmit = () => {
+        setErrors([]);
+        setLoading(true);
+        const newErrors = [];
+        const newUrls = [...urls];
+        const newAnalytics = { ...analytics };
+
+        formData.forEach((data, index) => {
+          // Validate inputs
+          if (!data.longUrl) {
+            newErrors[index] = { longUrl: 'URL is required' };
+            Logger.error('Empty URL input', { index });
+            return;
+          }
+          if (!isValidUrl(data.longUrl)) {
+            newErrors[index] = { longUrl: 'Invalid URL format' };
+            Logger.error('Invalid URL format', { url: data.longUrl, index });
+            return;
+          }
+          if (data.validity && isNaN(data.validity)) {
+            newErrors[index] = { validity: 'Validity must be a number' };
+            Logger.error('Invalid validity input', { validity: data.validity, index });
+            return;
+          }
+          if (data.shortcode && !isValidShortcode(data.shortcode)) {
+            newErrors[index] = { shortcode: 'Shortcode must be alphanumeric (3-10 characters)' };
+            Logger.error('Invalid shortcode format', { shortcode: data.shortcode, index });
+            return;
+          }
+          if (data.shortcode && urls.some((url) => url.shortcode === data.shortcode)) {
+            newErrors[index] = { shortcode: 'Shortcode already in use' };
+            Logger.error('Shortcode collision', { shortcode: data.shortcode, index });
+            return;
+          }
+
+          // Generate shortcode if not provided
+          let shortcode = data.shortcode;
+          if (!shortcode) {
+            do {
+              shortcode = generateShortcode();
+            } while (urls.some((url) => url.shortcode === shortcode));
+          }
+
+          const creationDate = new Date();
+          const validityMinutes = data.validity ? parseInt(data.validity) : 30;
+          const expiryDate = new Date(creationDate.getTime() + validityMinutes * 60 * 1000);
+
+          newUrls.push({
+            longUrl: data.longUrl,
+            shortcode,
+            creationDate: creationDate.toISOString(),
+            expiryDate: expiryDate.toISOString(),
+          });
+
+          newAnalytics[shortcode] = [];
+          Logger.info('Short URL created', { shortcode, longUrl: data.longUrl, validityMinutes });
+        });
+
+        if (newErrors.length > 0) {
+          setErrors(newErrors);
+          setLoading(false);
+          return;
+        }
+
+        saveUrls(newUrls);
+        saveAnalytics(newAnalytics);
+        setFormData([
+          { longUrl: '', validity: '', shortcode: '' },
+          { longUrl: '', validity: '', shortcode: '' },
+          { longUrl: '', validity: '', shortcode: '' },
+          { longUrl: '', validity: '', shortcode: '' },
+          { longUrl: '', validity: '', shortcode: '' },
+        ]);
+        setLoading(false);
+      };
+
+      // Handle URL redirection
+      const handleRedirect = (shortcode) => {
+        const url = urls.find((u) => u.shortcode === shortcode);
+        if (!url) {
+          Logger.error('Shortcode not found', { shortcode });
+          alert('Short URL not found');
+          return;
+        }
+        if (new Date(url.expiryDate) < new Date()) {
+          Logger.error('Short URL expired', { shortcode });
+          alert('Short URL has expired');
+          return;
+        }
+
+        // Simulate click analytics (coarse-grained location and source)
+        const newAnalytics = { ...analytics };
+        newAnalytics[shortcode] = newAnalytics[shortcode] || [];
+        newAnalytics[shortcode].push({
+          timestamp: new Date().toISOString(),
+          source: navigator.userAgent,
+          location: 'Unknown', // Simulate coarse-grained location
+        });
+        saveAnalytics(newAnalytics);
+        Logger.info('Short URL clicked', { shortcode, longUrl: url.longUrl });
+
+        window.location.href = url.longUrl;
+      };
+
+      // Tab change handler
+      const handleTabChange = (event, newValue) => {
+        setTabValue(newValue);
+        Logger.info('Tab changed', { tab: newValue === 0 ? 'Shortener' : 'Statistics' });
+      };
+
+      return (
+        <Container maxWidth="md" style={{ paddingTop: '20px' }}>
+          <Typography variant="h4" gutterBottom align="center">
+            URL Shortener
+          </Typography>
+          <Tabs value={tabValue} onChange={handleTabChange} centered>
+            <Tab label="Shorten URLs" />
+            <Tab label="Statistics" />
+          </Tabs>
+
+          {tabValue === 0 && (
+            <Box component={Paper} p={3} mt={3}>
+              <Typography variant="h6" gutterBottom>
+                Create Short URLs
+              </Typography>
+              {formData.map((data, index) => (
+                <Box key={index} mb={3}>
+                  <TextField
+                    fullWidth
+                    label="Long URL"
+                    value={data.longUrl}
+                    onChange={(e) => handleInputChange(index, 'longUrl', e.target.value)}
+                    error={!!errors[index]?.longUrl}
+                    helperText={errors[index]?.longUrl}
+                    margin="normal"
+                  />
+                  <TextField
+                    fullWidth
+                    label="Validity (minutes, default 30)"
+                    value={data.validity}
+                    onChange={(e) => handleInputChange(index, 'validity', e.target.value)}
+                    error={!!errors[index]?.validity}
+                    helperText={errors[index]?.validity}
+                    margin="normal"
+                  />
+                  <TextField
+                    fullWidth
+                    label="Custom Shortcode (optional)"
+                    value={data.shortcode}
+                    onChange={(e) => handleInputChange(index, 'shortcode', e.target.value)}
+                    error={!!errors[index]?.shortcode}
+                    helperText={errors[index]?.shortcode}
+                    margin="normal"
+                  />
+                </Box>
+              ))}
+              <Button
+                variant="contained"
+                color="primary"
+                onClick={handleSubmit}
+                disabled={loading}
+                fullWidth
+              >
+                {loading ? <CircularProgress size={24} /> : 'Shorten URLs'}
+              </Button>
+            </Box>
+          )}
+
+          {tabValue === 1 && (
+            <Box component={Paper} p={3} mt={3}>
+              <Typography variant="h6" gutterBottom>
+                Short URL Statistics
+              </Typography>
+              <TableContainer>
+                <Table>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Short URL</TableCell>
+                      <TableCell>Original URL</TableCell>
+                      <TableCell>Created</TableCell>
+                      <TableCell>Expires</TableCell>
+                      <TableCell>Clicks</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {urls.map((url) => (
+                      <TableRow key={url.shortcode}>
+                        <TableCell>
+                          <a
+                            href="#"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              handleRedirect(url.shortcode);
+                            }}
+                          >
+                            http://localhost:3000/{url.shortcode}
+                          </a>
+                        </TableCell>
+                        <TableCell>{url.longUrl}</TableCell>
+                        <TableCell>{new Date(url.creationDate).toLocaleString()}</TableCell>
+                        <TableCell>{new Date(url.expiryDate).toLocaleString()}</TableCell>
+                        <TableCell>
+                          {analytics[url.shortcode]?.length || 0}
+                          {analytics[url.shortcode]?.length > 0 && (
+                            <List dense>
+                              {analytics[url.shortcode].map((click, idx) => (
+                                <ListItem key={idx}>
+                                  <ListItemText
+                                    primary={`Click at ${new Date(click.timestamp).toLocaleString()}`}
+                                    secondary={`Source: ${click.source}, Location: ${click.location}`}
+                                  />
+                                </ListItem>
+                              ))}
+                            </List>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Box>
+          )}
+        </Container>
+      );
+    }
+
+    ReactDOM.render(<App />, document.getElementById('root'));
+  </script>
+</body>
+</html>
